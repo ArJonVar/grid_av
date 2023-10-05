@@ -177,7 +177,7 @@ class grid:
         then this function creates a second dictionary holding each column's id, and then posts the data one dictionary at a time (each is a row)
         post_to_top means the new row will appear on top, else it will appear on bottom
         TODO: if using post_to_top==False, I should really delete the empty rows in the sheet so it will properly post to bottom'''
-        column_title_list = list(self.posting_data[0].keys())
+        column_title_list = list(posting_data[0].keys())
         self.prep_post(column_title_list, posting_sheet_id)
         
         rows = []
@@ -185,6 +185,7 @@ class grid:
         for item in posting_data:
             row = smartsheet.models.Row()
             row.to_top = post_to_top
+            row.to_bottom= not(post_to_top)
             for key in self.column_id_dict:
                 if item.get(key) != None:     
                     row.cells.append({
