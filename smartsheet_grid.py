@@ -1,6 +1,8 @@
 #!/usr/bin/env python
 
-import smartsheet, pandas as pd
+import smartsheet
+import pandas as pd
+import datetime
 
 class grid:
     """
@@ -149,7 +151,8 @@ class grid:
             self.reduced_column_ids = list(self.column_reduction.id)
             self.reduced_column_names = list(self.column_reduction.title)
 #endregion
-#region post new rows
+#region ss post
+    #region new row(s)
     def prep_post(self, filtered_column_title_list="all_columns"):
         '''preps for ss post 
         creating a dictionary per column:
@@ -163,7 +166,6 @@ class grid:
             filtered_column_title_list = column_df['title'].tolist()
     
         self.column_id_dict = {title: column_df.loc[column_df['title'] == title]['id'].tolist()[0] for title in filtered_column_title_list}
-    
     def delete_all_rows(self):
         '''deletes up to 400 rows in 200 row chunks by grabbing row ids and deleting them one at a time in a for loop
         [NOT USED INDEPENDENTLY, BUT USED INSIDE OF POST_NEW_ROWS]'''
@@ -178,8 +180,7 @@ class grid:
                 row_list_del = []
         # Delete remaining rows
         if len(row_list_del) > 0:
-            self.smart.Sheets.delete_rows(self.grid_id, row_list_del)
-    
+            self.smart.Sheets.delete_rows(self.grid_id, row_list_del) 
     def post_new_rows(self, posting_data, post_fresh = False, post_to_top=False):
         '''posts new row to sheet, does not account for various column types at the moment
         posting data is a list of dictionaries, one per row, where the key is the name of the column, and the value is the value you want to post
@@ -209,4 +210,53 @@ class grid:
             rows.append(row)
 
         self.post_response = self.smart.Sheets.add_rows(posting_sheet_id, rows)
+    #endregion
+    #region post timestamp
+    def handle_update_stamps(self):
+        '''grabs summary id, and then runs the function that posts the date'''
+        current_date = datetime.date.today()
+        formatted_date = current_date.strftime('%m/%d/%y')
+
+        sum_id = self.grabrcreate_sum_id("Last API Automation", "DATE")
+        self.post_to_summary_field(sum_id, formatted_date)
+    def grabrcreate_sum_id(self, field_name_str, sum_type):
+        '''checks if there is a DATE summary field called "Last API Automation", if Y, pulls id, if N, creates the field.
+        then posts today's date to that field
+        [ONLY TESTED FOR DATE FIELDS FOR NOW]'''
+        # First, let's fetch the current summary fields of the sheet
+        self.fetch_summary_content()
+
+        # Check if "Last API Automation" summary field exists
+        automation_field = self.df[self.df['title'] == field_name_str]
+
+        # If it doesn't exist, create it
+        if automation_field.empty:
+            new_field = smartsheet.models.SummaryField({
+                "title": field_name_str,
+                "type": sum_type
+            })
+            response = self.smart.Sheets.add_sheet_summary_fields(self.grid_id, [new_field])
+            # Assuming the response has the created field's data, extract its ID
+            self.sum_id = response.data[0].id
+        else:
+            # Extract the ID from the existing field
+            self.sum_id = automation_field['id'].values[0]
+
+        return self.sum_id
+
+    def post_to_summary_field(self, sum_id, post):
+        '''posts to sum field, 
+        designed to: posts date to summary column to tell ppl when the last time this script succeeded was
+        [ONLY TESTED FOR DATE FIELDS FOR NOW]'''
+
+        sum = smartsheet.models.SummaryField({
+            "id": sum_id,
+            "ObjectValue":post
+        })
+        resp = self.smart.Sheets.update_sheet_summary_fields(
+            self.grid_id,    # sheet_id
+            [sum],
+            False    # rename_if_conflict
+        )
+    #endregion
 #endregion
