@@ -50,8 +50,12 @@ class grid:
             return "MUST SET TOKEN"
         else:
             return pd.DataFrame.from_dict(
-            (self.smart.Sheets.get_columns(self.grid_id, level=2, include='objectValue', include_all=True)).to_dict().get("data")
-        )
+                (self.smart.Sheets.get_columns(
+                    self.grid_id, 
+                    level=2, 
+                    include='objectValue', 
+                    include_all=True)
+                ).to_dict().get("data"))
 
     def df_id_by_col(self, column_names):
         '''I never use, name sounds like it returns an id per column'''
@@ -115,7 +119,7 @@ class grid:
             self.df = pd.DataFrame(self.grid_rows, columns=self.grid_columns)
             self.df["id"]=self.grid_row_ids
             self.column_df = self.get_column_df()
-            
+
     def fetch_summary_content(self):
         '''builds the summary df for summary columns'''
         if self.token == None:
@@ -151,34 +155,49 @@ class grid:
             self.reduced_column_ids = list(self.column_reduction.id)
             self.reduced_column_names = list(self.column_reduction.title)
 
-    def prep_post(self, column_title_list, sheet_id):
-        '''preps for ss post
+    def prep_post(self, filtered_column_title_list="all_columns"):
+        '''preps for ss post 
         creating a dictionary per column:
         { <title of column> : <column id> }
-        column_df argument is not needed if user used fetch_cotent() on sheet id already'''
+        filtered column title list is a list of column title str to prep for posting (if you are not posting to all columns)
+        [NOT USED INDEPENDENTLY, BUT USED INSIDE OF POST_NEW_ROWS]'''
 
-        # if the sheet idea matches current sheet id, grab existing column_df, else fetch it
-        if sheet_id == self.grid_id:
-            column_df = self.column_df
-        else:
-            self.grid_id = sheet_id
-            self.fetch_content()
-            column_df = self.column_df
-        
+        column_df = self.get_column_df()
 
-        if len(column_title_list) == 0:
-            return "column name list cannot be empty"
-        else:
-            self.column_id_dict = {title: column_df.loc[column_df['title'] == title]['id'].tolist()[0] for title in column_title_list}
+        if filtered_column_title_list == "all_columns":
+            filtered_column_title_list = column_df['title'].tolist()
     
-    def post_new_rows(self, posting_data, posting_sheet_id, post_to_top=False):
+        self.column_id_dict = {title: column_df.loc[column_df['title'] == title]['id'].tolist()[0] for title in filtered_column_title_list}
+    
+    def delete_all_rows(self):
+        '''deletes up to 400 rows in 200 row chunks by grabbing row ids and deleting them one at a time in a for loop
+        [NOT USED INDEPENDENTLY, BUT USED INSIDE OF POST_NEW_ROWS]'''
+        self.fetch_content()
+
+        row_list_del = []
+        for rowid in self.df['id'].to_list():
+            row_list_del.append(rowid)
+            # Delete rows to sheet by chunks of 200
+            if len(row_list_del) > 199:
+                self.smart.Sheets.delete_rows(self.grid_id, row_list_del)
+                row_list_del = []
+        # Delete remaining rows
+        if len(row_list_del) > 0:
+            self.smart.Sheets.delete_rows(self.grid_id, row_list_del)
+    
+    def post_new_rows(self, posting_data, post_fresh = False, post_to_top=False):
         '''posts new row to sheet, does not account for various column types at the moment
         posting data is a list of dictionaries, one per row, where the key is the name of the column, and the value is the value you want to post
         then this function creates a second dictionary holding each column's id, and then posts the data one dictionary at a time (each is a row)
-        post_to_top means the new row will appear on top, else it will appear on bottom
+        post_to_top = the new row will appear on top, else it will appear on bottom
+        post_fresh = first delete the whole sheet, then post (else it will just update existing sheet)
         TODO: if using post_to_top==False, I should really delete the empty rows in the sheet so it will properly post to bottom'''
+        
+        posting_sheet_id = self.grid_id
         column_title_list = list(posting_data[0].keys())
-        self.prep_post(column_title_list, posting_sheet_id)
+        self.prep_post(column_title_list)
+        if post_fresh:
+            self.delete_all_rows()
         
         rows = []
 
