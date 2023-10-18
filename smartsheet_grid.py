@@ -3,34 +3,53 @@
 import smartsheet, pandas as pd
 
 class grid:
-
     """
-    Global Variable
-    ____________
-    token --> MUST BE SET BEFORE PROCEEDING. >>> grid.token = {SMARTSHEET_ACCES_TOKEN}
+    A class that interacts with Smartsheet using its API.
 
-    Dependencies
-    ------------
-    smartsheet as smart (smartsheet-python-sdk)
-    pandas as pd
+    This class provides functionalities such as fetching sheet content, 
+    and posting new rows to a given Smartsheet sheet.
 
-    Attributes
-    __________
-    grid_id: int
-        sheet id of an existing Smartsheet sheet. terst 1
+    Important:
+    ----------
+    Before using this class, the 'token' class attribute should be set 
+    to the SMARTSHEET_ACCESS_TOKEN.
 
-    Methods
-    -------
-    grid_id --> returns the grid_id
-    grid_content ---> returns the content of a sheet as a dictionary.
-    grid_columns ---> returns a list of the column names.
-    grid_rows ---> returns a list of lists. each sub-list contains all the 'display values' of each cell in that row.
-    grid_row_ids---> returns a list o
-    f all the row ids
-    grid_column_ids ---> returns a list of all the column ids
-    df ---> returns a pandas DataFrame of the sheet.
-    delete_all_rows ---> deletes all rows in the sheet (in preperation for updating).
+    Attributes:
+    -----------
+    token : str, optional
+        The access token for Smartsheet API.
+    grid_id : int
+        ID of an existing Smartsheet sheet.
+    grid_content : dict, optional
+        Content of the sheet fetched from Smartsheet as a dictionary.
 
+    Methods:
+    --------
+    get_column_df() -> DataFrame:
+        Returns a DataFrame with details about the columns, such as title, type, options, etc.
+
+    fetch_content() -> None:
+        Fetches the sheet content from Smartsheet and sets various attributes like columns, rows, row IDs, etc.
+
+    fetch_summary_content() -> None:
+        Fetches and constructs a summary DataFrame for summary columns.
+
+    reduce_columns(exclusion_string: str) -> None:
+        Removes columns from the 'column_df' attribute based on characters/symbols provided in the exclusion_string.
+
+    prep_post(filtered_column_title_list: Union[str, List[str]]="all_columns") -> None:
+        Prepares a dictionary for column IDs based on their titles. Used internally for posting new rows.
+
+    delete_all_rows() -> None:
+        Deletes all rows in the current sheet.
+
+    post_new_rows(posting_data: List[Dict[str, Any]], post_fresh: bool=False, post_to_top: bool=False) -> None:
+        Posts new rows to the Smartsheet. Can optionally delete the whole sheet before posting or set the position of the new rows.
+
+    Dependencies:
+    -------------
+    - smartsheet (from smartsheet-python-sdk)
+    - pandas as pd
     """
 
     token = None
@@ -43,7 +62,7 @@ class grid:
         else:
             self.smart = smartsheet.Smartsheet(access_token=self.token)
             self.smart.errors_as_exceptions(True)
-    
+#region core get requests   
     def get_column_df(self):
         '''returns a df with data on the columns: title, type, options, etc...'''
         if self.token == None:
@@ -56,31 +75,6 @@ class grid:
                     include='objectValue', 
                     include_all=True)
                 ).to_dict().get("data"))
-
-    def df_id_by_col(self, column_names):
-        '''I never use, name sounds like it returns an id per column'''
-        if self.token == None:
-            return "MUST SET TOKEN"
-        else:
-            columnids = []
-            col_index = []
-            for col in column_names:
-                col1 = smart.Sheets.get_column_by_title(self.grid_id, col)
-                columnids.append(col1.to_dict().get("id"))
-                col_index.append(col1.to_dict().get("index"))
-            sorted_col = [x for y, x in sorted(zip(col_index, column_names))]
-            sfetch = self.smart.Sheets.get_sheet(self.grid_id, column_ids=columnids)
-            cols = ["id"] + sorted_col
-            c = []
-            p = sfetch.to_dict()
-            for i in p.get("rows"):
-                l = []
-                l.append(i.get("id"))
-                for i in i.get("cells"):
-                    l.append(i.get("displayValue"))
-                c.append(l)
-            return pd.DataFrame(c, columns=cols)
-
     def fetch_content(self):
         '''this fetches data, ask coby why this is seperated
         when this is done, there are now new objects created for various scenarios-- column_ids, row_ids, and the main sheet df'''
@@ -119,7 +113,6 @@ class grid:
             self.df = pd.DataFrame(self.grid_rows, columns=self.grid_columns)
             self.df["id"]=self.grid_row_ids
             self.column_df = self.get_column_df()
-
     def fetch_summary_content(self):
         '''builds the summary df for summary columns'''
         if self.token == None:
@@ -143,7 +136,8 @@ class grid:
             else:
                 self.grid_row_ids = [i.get("id") for i in (self.grid_content).get("data")]
             self.df = pd.DataFrame(self.grid_rows, columns=self.summary_params)
-    
+#endregion 
+#region helpers     
     def reduce_columns(self,exclusion_string):
         """a method on a grid{sheet_id}) object
         take in symbols/characters, reduces the columns in df that contain those symbols"""
@@ -154,7 +148,8 @@ class grid:
             self.column_reduction =  self.column_df[self.column_df['title'].str.contains(regex_string,regex=True)==False]
             self.reduced_column_ids = list(self.column_reduction.id)
             self.reduced_column_names = list(self.column_reduction.title)
-
+#endregion
+#region post new rows
     def prep_post(self, filtered_column_title_list="all_columns"):
         '''preps for ss post 
         creating a dictionary per column:
@@ -214,3 +209,4 @@ class grid:
             rows.append(row)
 
         self.post_response = self.smart.Sheets.add_rows(posting_sheet_id, rows)
+#endregion
