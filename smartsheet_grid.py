@@ -348,9 +348,9 @@ class grid:
             if row_id != "new_rows":
                 for column_name in self.column_id_dict.keys():
                     # Build new cell value
-                    print('value', self.update_data[row_id].get(column_name))
                     new_cell = smartsheet.models.Cell()
                     new_cell.column_id = self.column_id_dict[column_name]
+                    # stops error where post doesnt go through because value is "None"
                     if self.update_data[row_id].get(column_name) != None:
                         new_cell.value = self.update_data[row_id].get(column_name)
                     else:
@@ -364,7 +364,6 @@ class grid:
                 rows.append(new_row)
 
         # Update rows
-        print('execute update')
         self.update_response = self.smart.Sheets.update_rows(
           posting_sheet_id ,      # sheet_id
           rows)
