@@ -39,7 +39,7 @@ class grid:
     reduce_columns(exclusion_string: str) -> None:
         Removes columns from the 'column_df' attribute based on characters/symbols provided in the exclusion_string.
 
-    prep_post(filtered_column_title_list: Union[str, List[str]]="all_columns") -> None:
+    grab_posting_column_ids(filtered_column_title_list: Union[str, List[str]]="all_columns") -> None:
         Prepares a dictionary for column IDs based on their titles. Used internally for posting new rows.
 
     delete_all_rows() -> None:
@@ -48,6 +48,13 @@ class grid:
     post_new_rows(posting_data: List[Dict[str, Any]], post_fresh: bool=False, post_to_top: bool=False) -> None:
         Posts new rows to the Smartsheet. Can optionally delete the whole sheet before posting or set the position of the new rows.
 
+    update_rows(posting_data: List[Dict[str, Any]], primary_key: str):
+        Updates rows that can be updated, posts rows that do not map to the sheet.
+
+    grab_posting_row_ids(posting_data: List[Dict[str, Any]], primary_key: str):
+        returns a new posting_data called update_data that is a dictionary whose key is the row id, and whose value is the dictionary for the row <column name>:<field value>
+
+    
     Dependencies:
     -------------
     - smartsheet (from smartsheet-python-sdk)
