@@ -3,6 +3,8 @@
 import smartsheet
 import pandas as pd
 import datetime
+import time
+import math
 
 class grid:
     """
@@ -254,7 +256,6 @@ class grid:
             self.sum_id = automation_field['id'].values[0]
 
         return self.sum_id
-
     def post_to_summary_field(self, sum_id, post):
         '''posts to sum field, 
         designed to: posts date to summary column to tell ppl when the last time this script succeeded was
@@ -276,7 +277,8 @@ class grid:
 
         Parameters:
         - posting_data: Dictionary where each key is a column name and each value is the corresponding row value for that column.
-        - primary_key: A key from `posting_data` that serves as the reference to map row IDs to the posting data (must be case-sensitive match).
+        - primary_key: A key from `posting_data` that serves as the reference to map row IDs to the posting data (must be case-sensitive match). 
+            In otherwords, the primary_key is a str that matches one of the keys from the posting_data. This key represents the column that will be used to extract Row_IDs by finding the first row to match each posting_data's primary key value, and calling that the row Id for that dictionary
         - skip_nonmatch (optional, default=True): Determines the handling of non-matching primary keys. When set to `True`, rows with non-matching primary keys are ignored. When `False`, these rows are collected into a "new_rows" key in the resulting dictionary.  
 
         Process:
@@ -313,12 +315,13 @@ class grid:
             return update_data
         else:
             raise ValueError("Grid Instance is not appropriate for this task. Try create a new grid instance")
-    def update_rows(self, posting_data, primary_key):
+    def update_rows(self, posting_data, primary_key, update_type='default'):
         '''
         Updates rows (and adds misc rows) in the Smartsheet based on the provided posting data.  
 
         Parameters:
         - posting_data (list of dicts)
+        - primary_key (string which is equal to a key of one of the items in all dictionaries)
 
         Returns:
         None. Updates and possibly adds rows in the Smartsheet.
@@ -331,30 +334,100 @@ class grid:
             raise ValueError("Index Error reveals that your posting_data dictionary has key(s) that don't match the column names on the Smartsheet")
         self.update_data = self.grab_posting_row_ids(posting_data, primary_key)
 
-        rows = []
-        # Handle existing rows' updates
-        for row_id in self.update_data.keys():
-            if row_id != "new_rows":
-                # Build the row to update
-                new_row = smartsheet.models.Row()
-                new_row.id = row_id
-                for column_name in self.column_id_dict.keys():
-                    # Build new cell value
-                    new_cell = smartsheet.models.Cell()
-                    new_cell.column_id = int(self.column_id_dict[column_name])
-                    # stops error where post doesnt go through because value is "None"
-                    if self.update_data[row_id].get(column_name) != None:
-                        new_cell.value = self.update_data[row_id].get(column_name)
-                    else:
-                        new_cell.value = ""
-                    new_cell.strict = False
-                    new_row.cells.append(new_cell)
-                rows.append(new_row)
+        if update_type =='debug':
+            # Handle existing rows' updates (printing each row)
+            for i, row_id in enumerate(self.update_data.keys()):
+                if row_id != "new_rows":
+                    # Build the row to update
+                    new_row = smartsheet.models.Row()
+                    new_row.id = row_id
+                    for column_name in self.column_id_dict.keys():
+                        # does not post repost primary key
+                        if column_name != primary_key:
+                            # Build new cell value
+                            new_cell = smartsheet.models.Cell()
+                            new_cell.column_id = int(self.column_id_dict[column_name])
+                            # stops error where post doesnt go through because value is "None"
+                            if self.update_data[row_id].get(column_name) != None:
+                                print(f"{i+1}/{len(self.update_data.keys())}  ", self.update_data[row_id].get(column_name))
+                                new_cell.value = self.update_data[row_id].get(column_name)
+                            else:
+                                new_cell.value = ""
+                            new_cell.strict = False
+                            new_row.cells.append(new_cell)
 
-        # Update rows
-        self.update_response = self.smart.Sheets.update_rows(
-          posting_sheet_id ,      # sheet_id
-          rows)
+                    # Update rows
+                    self.update_response = self.smart.Sheets.update_rows(
+                      posting_sheet_id ,      # sheet_id
+                      [new_row])
+                    
+        elif update_type == 'batch':
+            rows = []
+            counter = 1
+            batch_total = int(math.ceil(len(self.update_data.keys()) / 350))
+            self.update_response = []       
+
+            for i, row_id in enumerate(self.update_data.keys()):
+                if row_id != "new_rows":
+                    new_row = smartsheet.models.Row()
+                    new_row.id = row_id
+                    for column_name in self.column_id_dict.keys():
+                        if column_name != primary_key:
+                            new_cell = smartsheet.models.Cell()
+                            new_cell.column_id = int(self.column_id_dict[column_name])
+                            new_cell.value = self.update_data[row_id].get(column_name, "")  # Use get method to handle None
+                            new_cell.strict = False
+                            new_row.cells.append(new_cell)
+                    rows.append(new_row)  # Properly add the new_row to the rows list       
+
+                # When 350 rows are collected or at the end of the data
+                if (i + 1) % 350 == 0 or (i + 1) == len(self.update_data.keys()):
+                    # Send the batch update
+                    self.update_response.append(self.smart.Sheets.update_rows(
+                        posting_sheet_id,
+                        rows  # Now passing the entire list of rows
+                    ))
+                    print(f"Batch {counter}/{batch_total}: updated {i + 1}/{len(self.update_data.keys())} in smartsheet")
+                    time.sleep(2)  # Optional: sleep to avoid hitting rate limits or as needed
+                    counter += 1
+                    rows = []  # Reset the rows list for the next batch     
+
+            # After the loop, check if there's any leftover rows to update
+            if rows:
+                self.update_response.append(self.smart.Sheets.update_rows(
+                    posting_sheet_id,
+                    rows
+                ))
+                print(f"Final batch: updated remaining {len(rows)} rows in smartsheet")
+
+        
+        elif update_type == 'default':
+            rows = []
+            # Handle existing rows' updates
+            for row_id in self.update_data.keys():
+                if row_id != "new_rows":
+                    # Build the row to update
+                    new_row = smartsheet.models.Row()
+                    new_row.id = row_id
+                    for column_name in self.column_id_dict.keys():
+                        # does not post repost primary key
+                        if column_name != primary_key:
+                            # Build new cell value
+                            new_cell = smartsheet.models.Cell()
+                            new_cell.column_id = int(self.column_id_dict[column_name])
+                            # stops error where post doesnt go through because value is "None"
+                            if self.update_data[row_id].get(column_name) != None:
+                                new_cell.value = self.update_data[row_id].get(column_name)
+                            else:
+                                new_cell.value = ""
+                            new_cell.strict = False
+                            new_row.cells.append(new_cell)
+                    rows.append(new_row)
+
+            # Update rows
+            self.update_response = self.smart.Sheets.update_rows(
+              posting_sheet_id ,      # sheet_id
+              rows)
 
         try:
             # Handle addition of new rows if the "new_rows" key is present
