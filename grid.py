@@ -196,7 +196,7 @@ class grid:
         # Delete remaining rows
         if len(row_list_del) > 0:
             self.smart.Sheets.delete_rows(self.grid_id, row_list_del) 
-    def post_new_rows(self, posting_data, post_fresh = False, post_to_top=False):
+    def post_new_rows(self, posting_data:list, post_fresh = False, post_to_top=False):
         '''posts new row to sheet, does not account for various column types at the moment (though date is just str w '%Y-%m-%dT%H:%M:%S format)
         posting data is a list of dictionaries, one per row, where the key is the name of the column, and the value is the value you want to post
         then this function creates a second dictionary holding each column's id, and then posts the data one dictionary at a time (each is a row)
@@ -204,6 +204,8 @@ class grid:
         post_fresh = first delete the whole sheet, then post (else it will just update existing sheet)
         TODO: if using post_to_top==False, I should really delete the empty rows in the sheet so it will properly post to bottom'''
         
+        if not isinstance(posting_data, list):
+            raise TypeError("Error: 'posting_data' must be in list format.")
         posting_sheet_id = self.grid_id
         column_title_list = list(posting_data[0].keys())
         try:
@@ -227,8 +229,13 @@ class grid:
                     })
             rows.append(row)
 
-        self.post_response = self.smart.Sheets.add_rows(posting_sheet_id, rows)
-        self.handle_update_stamps()
+        try:
+            self.post_response = self.smart.Sheets.add_rows(posting_sheet_id, rows)
+            self.handle_update_stamps()
+        except Exception as e:
+            raise ValueError(f"Post failed due to {e}")
+
+        return self.post_response
     #endregion
     #region post timestamp
     def handle_update_stamps(self):
@@ -297,7 +304,10 @@ class grid:
 
         if not self.df.empty:
             # Mapping of the primary key values to their corresponding row IDs from the current Smartsheet data
-            primary_to_row_id = dict(zip(self.df[primary_key], self.df['id']))  
+            try:
+                primary_to_row_id = dict(zip(self.df[primary_key], self.df['id']))
+            except KeyError:
+                raise KeyError('primary key does not match posting data')  
 
             # Dictionary to hold the mapping of row IDs to their posting data
             update_data = {}
@@ -324,7 +334,7 @@ class grid:
             return update_data
         else:
             raise ValueError("Grid Instance is not appropriate for this task. Try create a new grid instance")
-    def update_rows(self, posting_data, primary_key, update_type='default'):
+    def update_rows(self, posting_data:list, primary_key:str, update_type='default'):
         '''
         Updates rows (and adds misc rows) in the Smartsheet based on the provided posting data.  
 
@@ -335,6 +345,10 @@ class grid:
         Returns:
         None. Updates and possibly adds rows in the Smartsheet.
         '''
+        
+        if not isinstance(posting_data, list):
+            raise TypeError("Error: 'posting_data' must be in list format.")
+       
         posting_sheet_id = self.grid_id
         column_title_list = list(posting_data[0].keys())
         try:
@@ -361,7 +375,7 @@ class grid:
                             value = self.update_data[row_id].get(column_name)
                             if value != None:
                                 print(f"{i+1}/{len(self.update_data.keys())}  ", value)
-                                if value.startswith("="):
+                                if isinstance(value, str) and value.startswith("="):
                                     new_cell.formula = value
                                 else:
                                     new_cell.value = value
@@ -388,7 +402,7 @@ class grid:
                     for column_name in self.column_id_dict.keys():
                         if column_name != primary_key:
                             value = self.update_data[row_id].get(column_name)
-                            if value.startswith('='):
+                            if isinstance(value, str) and value.startswith("="):
                                 new_cell = smartsheet.models.Cell()
                                 new_cell.column_id = int(self.column_id_dict[column_name])
                                 new_cell.formula = value  # Use get method to handle None
@@ -440,7 +454,7 @@ class grid:
                             # stops error where post doesnt go through because value is "None"
                             value = self.update_data[row_id].get(column_name)
                             if value != None:
-                                if value.startswith("="):
+                                if isinstance(value, str) and value.startswith("="):
                                     new_cell.formula = value
                                 else:
                                     new_cell.value = value
