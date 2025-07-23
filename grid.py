@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# V4.22.2025
+# V7.23.2025
 # TODO: change fetch and fetch summary into dfs that can BOTH exist!
 
 import smartsheet
@@ -81,6 +81,40 @@ class grid:
         else:
             self.smart = smartsheet.Smartsheet(access_token=self.token)
             self.smart.errors_as_exceptions(True)
+    def _with_retry(self, func, *args, max_retries=3, retry_delay=2, **kwargs):
+        """
+        Executes a function with retry logic for transient errors like 502.
+    
+        Parameters:
+        - func: Function to execute
+        - args, kwargs: Arguments to pass to the function
+        - max_retries: Max number of attempts
+        - retry_delay: Initial delay between attempts (exponential backoff)
+    
+        Returns:
+        - The result of the function call if successful
+    
+        Raises:
+        - The last exception if all retries fail
+        """
+        for attempt in range(max_retries):
+            try:
+                return func(*args, **kwargs)
+            except Exception as e:
+                # Specifically catch transient errors
+                is_bad_gateway = (
+                    hasattr(e, 'response') and
+                    hasattr(e.response, 'status_code') and
+                    e.response.status_code == 502
+                )
+    
+                if attempt < max_retries - 1 and is_bad_gateway:
+                    wait = retry_delay * (2 ** attempt)
+                    print(f"[Retry] 502 Bad Gateway on attempt {attempt+1}/{max_retries}. Retrying in {wait}s...")
+                    time.sleep(wait)
+                else:
+                    raise
+                
 #region core get requests   
     def get_column_df(self):
         '''returns a df with data on the columns: title, type, options, etc...'''
@@ -230,7 +264,7 @@ class grid:
                     })
             rows.append(row)
 
-        self.post_response = self.smart.Sheets.add_rows(posting_sheet_id, rows)
+        self.post_response = self._with_retry(lambda: self.smart.Sheets.add_rows(posting_sheet_id, rows))
         self.handle_update_stamps()
     #endregion
     #region post timestamp
@@ -263,7 +297,7 @@ class grid:
                 "title": field_name_str,
                 "type": sum_type
             })
-            response = self.smart.Sheets.add_sheet_summary_fields(self.grid_id, [new_field])
+            response = self._with_retry(lambda: self.smart.Sheets.add_sheet_summary_fields(self.grid_id, [new_field]))
             # Assuming the response has the created field's data, extract its ID
             self.sum_id = response.data[0].id
         else:
@@ -380,9 +414,9 @@ class grid:
                             new_row.cells.append(new_cell)
 
                     # Update rows
-                    self.update_response = self.smart.Sheets.update_rows(
+                    self.update_response = self._with_retry(lambda: self.smart.Sheets.update_rows(
                       posting_sheet_id ,      # sheet_id
-                      [new_row])
+                      [new_row]))
                     
         elif update_type == 'batch':
             rows = []
@@ -460,9 +494,9 @@ class grid:
                     rows.append(new_row)
 
             # Update rows
-            self.update_response = self.smart.Sheets.update_rows(
+            self.update_response = self._with_retry(lambda: self.smart.Sheets.update_rows(
               posting_sheet_id ,      # sheet_id
-              rows)
+              rows))
 
         try:
             # Handle addition of new rows if the "new_rows" key is present
