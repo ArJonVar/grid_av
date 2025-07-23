@@ -10,6 +10,7 @@ import time
 import math
 import json
 from pathlib import Path
+from requests.exceptions import JSONDecodeError
 config = json.loads(Path("configs/config.json").read_text())
 
 
@@ -82,38 +83,28 @@ class grid:
             self.smart = smartsheet.Smartsheet(access_token=self.token)
             self.smart.errors_as_exceptions(True)
     def _with_retry(self, func, *args, max_retries=3, retry_delay=2, **kwargs):
-        """
-        Executes a function with retry logic for transient errors like 502.
-    
-        Parameters:
-        - func: Function to execute
-        - args, kwargs: Arguments to pass to the function
-        - max_retries: Max number of attempts
-        - retry_delay: Initial delay between attempts (exponential backoff)
-    
-        Returns:
-        - The result of the function call if successful
-    
-        Raises:
-        - The last exception if all retries fail
-        """
         for attempt in range(max_retries):
             try:
                 return func(*args, **kwargs)
             except Exception as e:
-                # Specifically catch transient errors
-                is_bad_gateway = (
-                    hasattr(e, 'response') and
-                    hasattr(e.response, 'status_code') and
-                    e.response.status_code == 502
-                )
-    
-                if attempt < max_retries - 1 and is_bad_gateway:
+                should_retry = False
+
+                # Retry on known transient issues
+                if hasattr(e, 'response') and hasattr(e.response, 'status_code'):
+                    if e.response.status_code == 502:
+                        should_retry = True
+                elif isinstance(e, json.JSONDecodeError):
+                    should_retry = True
+                elif '502 Bad Gateway' in str(e) or 'Expecting value' in str(e):
+                    should_retry = True
+
+                if should_retry and attempt < max_retries - 1:
                     wait = retry_delay * (2 ** attempt)
-                    print(f"[Retry] 502 Bad Gateway on attempt {attempt+1}/{max_retries}. Retrying in {wait}s...")
+                    print(f"[Retry] Attempt {attempt+1}/{max_retries} failed with error: {e}. Retrying in {wait}s...")
                     time.sleep(wait)
                 else:
                     raise
+
                 
 #region core get requests   
     def get_column_df(self):
