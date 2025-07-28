@@ -11,6 +11,7 @@ import math
 import json
 from pathlib import Path
 from requests.exceptions import JSONDecodeError
+from dateutil.parser import parse
 config = json.loads(Path("configs/config.json").read_text())
 
 
@@ -81,31 +82,7 @@ class grid:
             return "MUST SET TOKEN"
         else:
             self.smart = smartsheet.Smartsheet(access_token=self.token)
-            self.smart.errors_as_exceptions(True)
-    def _with_retry(self, func, *args, max_retries=3, retry_delay=2, **kwargs):
-        for attempt in range(max_retries):
-            try:
-                return func(*args, **kwargs)
-            except Exception as e:
-                should_retry = False
-
-                # Retry on known transient issues
-                if hasattr(e, 'response') and hasattr(e.response, 'status_code'):
-                    if e.response.status_code == 502:
-                        should_retry = True
-                elif isinstance(e, json.JSONDecodeError):
-                    should_retry = True
-                elif '502 Bad Gateway' in str(e) or 'Expecting value' in str(e):
-                    should_retry = True
-
-                if should_retry and attempt < max_retries - 1:
-                    wait = retry_delay * (2 ** attempt)
-                    print(f"[Retry] Attempt {attempt+1}/{max_retries} failed with error: {e}. Retrying in {wait}s...")
-                    time.sleep(wait)
-                else:
-                    raise
-
-                
+            self.smart.errors_as_exceptions(True)           
 #region core get requests   
     def get_column_df(self):
         '''returns a df with data on the columns: title, type, options, etc...'''
@@ -193,6 +170,61 @@ class grid:
             self.column_reduction =  self.column_df[self.column_df['title'].str.contains(regex_string,regex=True)==False]
             self.reduced_column_ids = list(self.column_reduction.id)
             self.reduced_column_names = list(self.column_reduction.title)
+    def is_date_like(self, s):
+        """Returns True if string s appears to be a valid date/time."""
+        if not isinstance(s, str):
+            return False
+        try:
+            parse(s, fuzzy=False)
+            return True
+        except (ValueError, TypeError):
+            return False
+    def parse_to_iso8601(self, s):
+        """
+        Attempts to parse a string into an ISO-8601 formatted datetime string.
+        If parsing fails, returns the original input unchanged.
+        """
+        if not isinstance(s, str):
+            return s
+        try:
+            dt = parse(s, fuzzy=False)
+            return dt.isoformat()
+        except (ValueError, TypeError):
+            return s
+    
+    def _with_retry(self, func, *args, max_retries=3, retry_delay=2, **kwargs):
+        '''cateloging issues I get and if they are issues that warrent retry, editing this script to allow for it'''
+        for attempt in range(max_retries):
+            try:
+                return func(*args, **kwargs)
+            except Exception as e:
+                should_retry = False    
+
+                # Check if the exception has a status code (e.g. Smartsheet ApiError or HTTPError)
+                if hasattr(e, 'result') and hasattr(e.result, 'statusCode'):
+                    status = getattr(e.result, 'statusCode')
+                    if status in (500, 502):
+                        should_retry = True 
+
+                elif hasattr(e, 'response') and hasattr(e.response, 'status_code'):
+                    if e.response.status_code in (500, 502):
+                        should_retry = True 
+
+                elif isinstance(e, json.JSONDecodeError):
+                    should_retry = True 
+
+                elif '502 Bad Gateway' in str(e) or '500 Internal Server Error' in str(e):
+                    should_retry = True 
+
+                elif 'Expecting value' in str(e):
+                    should_retry = True 
+
+                if should_retry and attempt < max_retries - 1:
+                    wait = retry_delay * (2 ** attempt)
+                    print(f"[Retry] Attempt {attempt + 1}/{max_retries} failed with error: {e}. Retrying in {wait}s...")
+                    time.sleep(wait)
+                else:
+                    raise    
 #endregion
 #region ss post
     #region new row(s)
@@ -248,6 +280,9 @@ class grid:
             row.to_top = post_to_top
             row.to_bottom= not(post_to_top)
             for key in self.column_id_dict:
+                if self.is_date_like(item[key]):
+                    date_format = self.parse_to_iso8601(item[key])
+                    item[key] = date_format
                 if item.get(key) != None:     
                     row.cells.append({
                     'column_id': self.column_id_dict[key],
@@ -398,6 +433,9 @@ class grid:
                                 if value.startswith("="):
                                     new_cell.formula = value
                                 else:
+                                    if self.is_date_like(value):
+                                        date_formatted_value = self.parse_to_iso8601(value)
+                                        value = date_formatted_value
                                     new_cell.value = value
                             else:
                                 new_cell.value = ""
@@ -431,6 +469,9 @@ class grid:
                             else:
                                 new_cell = smartsheet.models.Cell()
                                 new_cell.column_id = int(self.column_id_dict[column_name])
+                                if self.is_date_like(value):
+                                    date_formatted_value = self.parse_to_iso8601(value)
+                                    value = date_formatted_value
                                 new_cell.value = value  # Use get method to handle None
                                 new_cell.strict = False
                                 new_row.cells.append(new_cell)
@@ -477,6 +518,9 @@ class grid:
                                 if value.startswith("="):
                                     new_cell.formula = value
                                 else:
+                                    if self.is_date_like(value):
+                                        date_formatted_value = self.parse_to_iso8601(value)
+                                        value = date_formatted_value
                                     new_cell.value = value
                             else:
                                 new_cell.value = ""
